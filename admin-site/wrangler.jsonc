@@ -3,20 +3,29 @@
   "name": "admin-site",
   "compatibility_date": "2026-03-09",
   "pages_build_output_dir": "./dist",
-  "compatibility_flags": ["nodejs_compat"]
-  // D1 데이터베이스 (user-site와 동일한 DB binding)
-  // "d1_databases": [
-  //   {
-  //     "binding": "DB",
-  //     "database_name": "casino-production",
-  //     "database_id": "YOUR_DATABASE_ID"
-  //   }
-  // ],
-  // KV 네임스페이스 (user-site와 동일한 KV binding)
+  "compatibility_flags": ["nodejs_compat"],
+
+  // ── 공유 D1 데이터베이스 ──────────────────────────────
+  // user-site와 완전히 동일한 database_id를 사용합니다.
+  // 두 사이트가 같은 DB를 바라보므로 데이터가 공유됩니다.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "casino-production",
+      "database_id": "REPLACE_WITH_YOUR_DATABASE_ID"
+    }
+  ],
+
+  // ── 관리자 인증 시크릿 ────────────────────────────────
+  // 배포 후 아래 명령으로 시크릿을 설정하세요:
+  //   npx wrangler pages secret put ADMIN_USER --project-name admin-site
+  //   npx wrangler pages secret put ADMIN_PASS --project-name admin-site
+
+  // ── (선택) KV 네임스페이스 ────────────────────────────
   // "kv_namespaces": [
   //   {
   //     "binding": "KV",
-  //     "id": "YOUR_KV_ID"
+  //     "id": "REPLACE_WITH_YOUR_KV_ID"
   //   }
   // ]
 }

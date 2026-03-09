@@ -1,0 +1,29 @@
+{
+  "name": "my-project",
+  "private": true,
+  "scripts": {
+    "────── DB (공유 casino-production) ──────": "",
+    "db:create":        "npx wrangler d1 create casino-production",
+    "db:migrate:local": "npx wrangler d1 migrations apply casino-production --local --migrations-dir=./migrations",
+    "db:migrate:prod":  "npx wrangler d1 migrations apply casino-production --migrations-dir=./migrations",
+    "db:seed:local":    "npx wrangler d1 execute casino-production --local --file=./seed.sql",
+    "db:reset:local":   "npm run db:migrate:local && npm run db:seed:local",
+    "db:console:local": "npx wrangler d1 execute casino-production --local",
+    "db:console:prod":  "npx wrangler d1 execute casino-production",
+    "────── user-site ──────": "",
+    "user:install": "cd user-site && npm install",
+    "user:build":   "cd user-site && npm run build",
+    "user:deploy":  "cd user-site && npm run build && npx wrangler pages deploy dist --project-name user-site",
+    "────── admin-site ──────": "",
+    "admin:install": "cd admin-site && npm install",
+    "admin:build":   "cd admin-site && npm run build",
+    "admin:deploy":  "cd admin-site && npm run build && npx wrangler pages deploy dist --project-name admin-site",
+    "────── 전체 ──────": "",
+    "install:all": "npm run user:install && npm run admin:install",
+    "build:all":   "npm run user:build && npm run admin:build",
+    "deploy:all":  "npm run user:deploy && npm run admin:deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.4.0"
+  }
+}

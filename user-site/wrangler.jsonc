@@ -3,5 +3,25 @@
   "name": "user-site",
   "compatibility_date": "2026-03-09",
   "pages_build_output_dir": "./dist",
-  "compatibility_flags": ["nodejs_compat"]
+  "compatibility_flags": ["nodejs_compat"],
+
+  // ── 공유 D1 데이터베이스 ──────────────────────────────
+  // admin-site와 동일한 database_id를 사용합니다.
+  // database_id는 아래 명령으로 생성 후 채워넣으세요:
+  //   npx wrangler d1 create casino-production
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "casino-production",
+      "database_id": "REPLACE_WITH_YOUR_DATABASE_ID"
+    }
+  ]
+
+  // ── (선택) KV 네임스페이스 ────────────────────────────
+  // "kv_namespaces": [
+  //   {
+  //     "binding": "KV",
+  //     "id": "REPLACE_WITH_YOUR_KV_ID"
+  //   }
+  // ]
 }
