@@ -6,3 +6,4 @@ dist/
 *.log
 *.tar.gz
 *.zip
+user-site/node_modules
