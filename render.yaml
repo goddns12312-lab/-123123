@@ -1,0 +1,57 @@
+# Render 배포 설정 — Supabase + Render 완전 무료 스택
+# 문서: https://render.com/docs/yaml-spec
+
+services:
+  - type: web
+    name: casino-backend
+    runtime: node
+    region: oregon          # 무료 플랜 가용 리전
+    plan: free
+    rootDir: backend        # 저장소 내 백엔드 서브디렉토리
+
+    buildCommand: npm install
+    startCommand: npm start
+
+    envVars:
+      - key: NODE_VERSION
+        value: "20.11.0"
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+
+      # ── Supabase 연결 정보 ──────────────────────────────────────────────────
+      # Render 대시보드 > casino-backend > Environment 에서 직접 입력하세요.
+      # (보안상 YAML에 민감 정보를 포함하지 않습니다)
+      #
+      # 확인 위치: Supabase Dashboard → Settings → API
+      - key: SUPABASE_URL
+        sync: false          # 대시보드에서 수동 입력
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false          # 절대 공개 저장소에 커밋 금지!
+
+      # ── JWT ────────────────────────────────────────────────────────────────
+      - key: JWT_SECRET
+        sync: false          # openssl rand -base64 32 로 생성한 값 입력
+      - key: JWT_EXPIRES_IN
+        value: "24h"
+
+      # ── 관리자 계정 ────────────────────────────────────────────────────────
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASS
+        sync: false
+
+      # ── CORS ───────────────────────────────────────────────────────────────
+      # 배포 후 실제 user-site, admin-site URL로 변경하세요
+      - key: ALLOWED_ORIGINS
+        value: "https://user-site.pages.dev,https://admin-site.pages.dev"
+
+      # ── Rate Limit ─────────────────────────────────────────────────────────
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "900000"
+      - key: RATE_LIMIT_MAX
+        value: "100"
+
+    healthCheckPath: /health
+    autoDeploy: true
