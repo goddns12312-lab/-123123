@@ -1,15 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "admin-site",
+  "name": "casino-root",
   "compatibility_date": "2026-03-09",
-  "pages_build_output_dir": "./dist",
-  "compatibility_flags": ["nodejs_compat"],
 
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "casino-production",
-      "database_id": "local-casino-production"
+      "database_id": "local-casino-production",
+      "migrations_dir": "./migrations"
     }
   ]
 }

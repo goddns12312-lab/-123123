@@ -6,13 +6,16 @@
 
 -- ── 회원 테이블 ───────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
-  id          INTEGER  PRIMARY KEY AUTOINCREMENT,
-  username    TEXT     UNIQUE NOT NULL,
-  email       TEXT     NOT NULL,
-  phone       TEXT     DEFAULT '',
-  status      TEXT     DEFAULT 'pending',  -- active | suspended | pending
-  balance     INTEGER  DEFAULT 0,
-  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+  id                INTEGER  PRIMARY KEY AUTOINCREMENT,
+  username          TEXT     UNIQUE NOT NULL,
+  nickname          TEXT     DEFAULT '',
+  password          TEXT     DEFAULT '',
+  email             TEXT     DEFAULT '',
+  phone             TEXT     DEFAULT '',
+  exchange_password TEXT     DEFAULT '',
+  status            TEXT     DEFAULT 'pending',  -- active | suspended | pending
+  balance           INTEGER  DEFAULT 0,
+  created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_status     ON users(status);

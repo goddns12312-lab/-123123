@@ -2,11 +2,9 @@ import { Hono } from 'hono'
 import { serveStatic } from 'hono/cloudflare-workers'
 
 // ── Admin API URL 설정 ──────────────────────────────────────────
-// 로컬 sandbox 환경: admin-site가 포트 3001에서 실행
-// 실제 배포 시: ADMIN_API_URL 환경변수로 admin-site URL 지정
 const ADMIN_API_URL = 'http://localhost:3001'
 
-type Bindings = { ADMIN_API_URL?: string }
+type Bindings = { DB?: D1Database; ADMIN_API_URL?: string }
 const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('/static/*', serveStatic({ root: './' }))
@@ -18,8 +16,130 @@ app.get('/promotions', (c) => c.html(promotionsPage()))
 app.get('/api/winners', (c) => c.json({ winners: recentWinners }))
 app.get('/api/deposits', (c) => c.json({ deposits: recentDeposits }))
 
+// ════════════════════════════════════════════════════════════════
+//  회원가입 API  POST /api/auth/register
+// ════════════════════════════════════════════════════════════════
+app.post('/api/auth/register', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { username, nickname = '', password, phone = '', exchange_password = '' } = body
+    if (!username || !password) {
+      return c.json({ success: false, error: '아이디와 비밀번호는 필수입니다.' }, 400)
+    }
+    if (username.length < 4) {
+      return c.json({ success: false, error: '아이디는 4자 이상이어야 합니다.' }, 400)
+    }
+    if (password.length < 6) {
+      return c.json({ success: false, error: '비밀번호는 6자 이상이어야 합니다.' }, 400)
+    }
+
+    if (c.env?.DB) {
+      // ── D1 DB 모드 ──
+      const existing = await c.env.DB
+        .prepare('SELECT id FROM users WHERE username = ?')
+        .bind(username).first()
+      if (existing) {
+        return c.json({ success: false, error: '이미 사용 중인 아이디입니다.' }, 409)
+      }
+      const result = await c.env.DB
+        .prepare('INSERT INTO users (username, nickname, password, phone, exchange_password, status, balance) VALUES (?,?,?,?,?,?,?)')
+        .bind(username, nickname, password, phone, exchange_password, 'pending', 0)
+        .run()
+      return c.json({ success: true, data: { id: result.meta.last_row_id, username, nickname, status: 'pending' } })
+    } else {
+      // ── Admin API 프록시 모드 (D1 없을 때) ──
+      const adminUrl = c.env?.ADMIN_API_URL ?? ADMIN_API_URL
+      const res = await fetch(`${adminUrl}/api/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, nickname, password, phone, exchange_password, status: 'pending', balance: 0 }),
+      })
+      const data = await res.json() as any
+      if (!data.success) return c.json({ success: false, error: data.error ?? '가입 실패' }, 400)
+      return c.json({ success: true, data: { id: data.data?.id, username, nickname, status: 'pending' } })
+    }
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message ?? '서버 오류' }, 500)
+  }
+})
+
+// ════════════════════════════════════════════════════════════════
+//  로그인 API  POST /api/auth/login
+// ════════════════════════════════════════════════════════════════
+app.post('/api/auth/login', async (c) => {
+  try {
+    const { username, password } = await c.req.json()
+    if (!username || !password) {
+      return c.json({ success: false, error: '아이디와 비밀번호를 입력해주세요.' }, 400)
+    }
+
+    if (c.env?.DB) {
+      // ── D1 DB 모드 ──
+      const user = await c.env.DB
+        .prepare('SELECT id, username, nickname, password, status, balance FROM users WHERE username = ?')
+        .bind(username).first<any>()
+      if (!user) return c.json({ success: false, error: '아이디 또는 비밀번호가 틀렸습니다.' }, 401)
+      if (user.password !== password) return c.json({ success: false, error: '아이디 또는 비밀번호가 틀렸습니다.' }, 401)
+      if (user.status === 'suspended') return c.json({ success: false, error: '이용이 정지된 계정입니다. 고객센터에 문의해주세요.' }, 403)
+      return c.json({
+        success: true,
+        data: {
+          token: `user-${user.id}-${Date.now()}`,
+          id: user.id,
+          username: user.username,
+          nickname: user.nickname || user.username,
+          status: user.status,
+          balance: user.balance,
+        }
+      })
+    } else {
+      // ── Admin API 프록시 모드 ──
+      const adminUrl = c.env?.ADMIN_API_URL ?? ADMIN_API_URL
+      const res = await fetch(`${adminUrl}/api/users?q=${encodeURIComponent(username)}&limit=1`)
+      const data = await res.json() as any
+      const user = data.data?.find((u: any) => u.username === username)
+      if (!user) return c.json({ success: false, error: '아이디 또는 비밀번호가 틀렸습니다.' }, 401)
+      if (user.password !== password) return c.json({ success: false, error: '아이디 또는 비밀번호가 틀렸습니다.' }, 401)
+      if (user.status === 'suspended') return c.json({ success: false, error: '이용이 정지된 계정입니다.' }, 403)
+      return c.json({
+        success: true,
+        data: {
+          token: `user-${user.id}-${Date.now()}`,
+          id: user.id,
+          username: user.username,
+          nickname: user.nickname || user.username,
+          status: user.status,
+          balance: user.balance,
+        }
+      })
+    }
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message ?? '서버 오류' }, 500)
+  }
+})
+
+// ════════════════════════════════════════════════════════════════
+//  내 정보 조회  GET /api/auth/me?username=xxx
+// ════════════════════════════════════════════════════════════════
+app.get('/api/auth/me', async (c) => {
+  const username = c.req.query('username')
+  if (!username) return c.json({ success: false, error: '로그인이 필요합니다.' }, 401)
+  if (c.env?.DB) {
+    const user = await c.env.DB
+      .prepare('SELECT id, username, nickname, status, balance FROM users WHERE username = ?')
+      .bind(username).first<any>()
+    if (!user) return c.json({ success: false, error: '사용자 없음' }, 404)
+    return c.json({ success: true, data: user })
+  }
+  const adminUrl = c.env?.ADMIN_API_URL ?? ADMIN_API_URL
+  const res = await fetch(`${adminUrl}/api/users?q=${encodeURIComponent(username)}&limit=1`)
+  const data = await res.json() as any
+  const user = data.data?.find((u: any) => u.username === username)
+  if (!user) return c.json({ success: false, error: '사용자 없음' }, 404)
+  return c.json({ success: true, data: { id: user.id, username: user.username, nickname: user.nickname, status: user.status, balance: user.balance } })
+})
+
 // ── Admin 데이터 프록시 엔드포인트 (CORS 우회용) ───────────────────
-// user-site 프론트엔드 → /api/admin/* → admin-site API 전달
 app.get('/api/admin/games', async (c) => {
   try {
     const adminUrl = c.env?.ADMIN_API_URL ?? ADMIN_API_URL
@@ -27,7 +147,6 @@ app.get('/api/admin/games', async (c) => {
     const data = await res.json() as any
     return c.json(data)
   } catch {
-    // admin-site 미연결 시 기본값 반환
     return c.json({ success: true, data: { live: defaultLiveGames, slot: defaultSlotGames } })
   }
 })
@@ -1129,7 +1248,7 @@ function mainPage() {
     <small>PREMIUM ONLINE CASINO</small>
   </div>
 
-  <div class="hdr-right">
+  <div class="hdr-right" id="hdr-auth">
     <button class="btn-ghost" onclick="openModal('login')">로그인</button>
     <button class="btn-filled" onclick="openModal('register')">회원가입</button>
     <button class="hamburger" id="ham" onclick="toggleMobile()">
@@ -1450,15 +1569,16 @@ function mainPage() {
     <button class="modal-close" onclick="closeModal('login')"><i class="fas fa-times"></i></button>
     <div class="modal-title">LOGIN</div>
     <div class="modal-sub">계정에 로그인하세요</div>
-    <input class="m-input" type="text" placeholder="아이디">
-    <input class="m-input" type="password" placeholder="비밀번호">
+    <div id="login-err" style="display:none;background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:9px 12px;border-radius:6px;font-size:0.78rem;margin-bottom:10px;"></div>
+    <input id="login-username" class="m-input" type="text" placeholder="아이디">
+    <input id="login-password" class="m-input" type="password" placeholder="비밀번호">
     <div style="display:flex;justify-content:space-between;margin-bottom:14px;">
       <label style="font-size:0.74rem;color:var(--text2);display:flex;align-items:center;gap:5px;cursor:pointer;">
-        <input type="checkbox" style="accent-color:var(--gold);"> 자동 로그인
+        <input type="checkbox" id="login-remember" style="accent-color:var(--gold);"> 자동 로그인
       </label>
       <span style="font-size:0.74rem;color:var(--gold-dim);cursor:pointer;">아이디/비밀번호 찾기</span>
     </div>
-    <button class="m-btn shine-wrap">로그인</button>
+    <button class="m-btn shine-wrap" id="login-btn" onclick="doLogin()">로그인</button>
     <div class="m-divider"></div>
     <div class="m-switch">계정이 없으신가요? <a onclick="switchModal('login','register')">회원가입 →</a></div>
   </div>
@@ -1470,22 +1590,182 @@ function mainPage() {
     <button class="modal-close" onclick="closeModal('register')"><i class="fas fa-times"></i></button>
     <div class="modal-title">REGISTER</div>
     <div class="modal-sub">🎁 가입 즉시 신규 보너스 지급</div>
-    <input class="m-input" type="text" placeholder="아이디 (영문+숫자 6~12자)">
-    <input class="m-input" type="password" placeholder="비밀번호 (8자 이상)">
-    <input class="m-input" type="password" placeholder="비밀번호 확인">
-    <input class="m-input" type="text" placeholder="닉네임">
-    <input class="m-input" type="text" placeholder="추천인 코드 (선택)">
+    <div id="reg-err" style="display:none;background:rgba(248,113,113,0.12);border:1px solid rgba(248,113,113,0.3);color:#f87171;padding:9px 12px;border-radius:6px;font-size:0.78rem;margin-bottom:10px;"></div>
+    <div id="reg-ok" style="display:none;background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.3);color:#4ade80;padding:9px 12px;border-radius:6px;font-size:0.78rem;margin-bottom:10px;"></div>
+    <input id="reg-username" class="m-input" type="text" placeholder="아이디 (4자 이상)">
+    <input id="reg-nickname" class="m-input" type="text" placeholder="닉네임">
+    <input id="reg-password" class="m-input" type="password" placeholder="비밀번호 (6자 이상)">
+    <input id="reg-password2" class="m-input" type="password" placeholder="비밀번호 확인">
+    <input id="reg-phone" class="m-input" type="text" placeholder="연락처 (선택)">
     <label style="display:flex;align-items:flex-start;gap:8px;font-size:0.72rem;color:var(--text2);margin-bottom:14px;cursor:pointer;line-height:1.5;">
-      <input type="checkbox" style="accent-color:var(--gold);margin-top:2px;flex-shrink:0;">
+      <input type="checkbox" id="reg-agree" style="accent-color:var(--gold);margin-top:2px;flex-shrink:0;">
       만 19세 이상이며 이용약관 및 개인정보처리방침에 동의합니다
     </label>
-    <button class="m-btn shine-wrap">가입하기</button>
+    <button class="m-btn shine-wrap" id="reg-btn" onclick="doRegister()">가입하기</button>
     <div class="m-divider"></div>
     <div class="m-switch">이미 계정이 있으신가요? <a onclick="switchModal('register','login')">로그인 →</a></div>
   </div>
 </div>
 
+<!-- ════ USER INFO PANEL (로그인 후) ════ -->
+<div id="modal-mypage" class="modal-overlay">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('mypage')"><i class="fas fa-times"></i></button>
+    <div class="modal-title">MY PAGE</div>
+    <div style="text-align:center;padding:10px 0 20px;">
+      <div style="width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,var(--gold),var(--gold2));display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:24px;">👤</div>
+      <div id="my-nickname" style="font-size:1.1rem;font-weight:700;color:var(--gold);margin-bottom:4px;"></div>
+      <div id="my-username" style="font-size:0.78rem;color:var(--text2);margin-bottom:16px;"></div>
+      <div style="background:var(--black3);border:1px solid var(--gold-border);border-radius:8px;padding:14px;margin-bottom:20px;">
+        <div style="font-size:0.72rem;color:var(--text2);margin-bottom:4px;">보유 잔액</div>
+        <div id="my-balance" style="font-size:1.6rem;font-weight:700;color:var(--gold);"></div>
+      </div>
+      <div id="my-status-wrap" style="margin-bottom:20px;"></div>
+    </div>
+    <button class="m-btn shine-wrap" onclick="doLogout()" style="background:rgba(248,113,113,0.15);border:1px solid rgba(248,113,113,0.3);color:#f87171;">로그아웃</button>
+  </div>
+</div>
+
 <script>
+// ══ 세션 관리 ══
+let _session = null;
+try { _session = JSON.parse(sessionStorage.getItem('casino_user') || localStorage.getItem('casino_user') || 'null'); } catch{}
+
+function saveSession(data, remember) {
+  _session = data;
+  const s = JSON.stringify(data);
+  sessionStorage.setItem('casino_user', s);
+  if (remember) localStorage.setItem('casino_user', s);
+}
+function clearSession() {
+  _session = null;
+  sessionStorage.removeItem('casino_user');
+  localStorage.removeItem('casino_user');
+}
+function renderHeader() {
+  const right = document.getElementById('hdr-auth');
+  if (!right) return;
+  if (_session) {
+    right.innerHTML = '<span style="font-size:0.82rem;color:var(--gold2);margin-right:6px;">' + (_session.nickname||_session.username) + '님</span>'
+      + '<span style="font-size:0.78rem;color:var(--text2);margin-right:10px;">' + Number(_session.balance||0).toLocaleString() + '원</span>'
+      + '<button class="btn-ghost" onclick="openMypage()">마이페이지</button>';
+  } else {
+    right.innerHTML = '<button class="btn-ghost" onclick="openModal(\'login\')">로그인</button>'
+      + '<button class="btn-filled" onclick="openModal(\'register\')">회원가입</button>';
+  }
+}
+
+// ══ 로그인 ══
+async function doLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const remember = document.getElementById('login-remember').checked;
+  const errEl = document.getElementById('login-err');
+  const btn = document.getElementById('login-btn');
+  errEl.style.display = 'none';
+  if (!username || !password) { errEl.textContent='아이디와 비밀번호를 입력해주세요.'; errEl.style.display='block'; return; }
+  btn.textContent = '로그인 중...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/auth/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!data.success) { errEl.textContent = data.error || '로그인 실패'; errEl.style.display='block'; return; }
+    saveSession(data.data, remember);
+    closeModal('login');
+    renderHeader();
+    showToast('✅ 환영합니다, ' + (data.data.nickname||data.data.username) + '님!');
+    document.getElementById('login-username').value='';
+    document.getElementById('login-password').value='';
+  } catch(e) {
+    errEl.textContent = '서버 연결 오류가 발생했습니다.'; errEl.style.display='block';
+  } finally {
+    btn.textContent = '로그인'; btn.disabled = false;
+  }
+}
+
+// ══ 회원가입 ══
+async function doRegister() {
+  const username = document.getElementById('reg-username').value.trim();
+  const nickname = document.getElementById('reg-nickname').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const password2 = document.getElementById('reg-password2').value;
+  const phone    = document.getElementById('reg-phone').value.trim();
+  const agree    = document.getElementById('reg-agree').checked;
+  const errEl    = document.getElementById('reg-err');
+  const okEl     = document.getElementById('reg-ok');
+  const btn      = document.getElementById('reg-btn');
+  errEl.style.display='none'; okEl.style.display='none';
+  if (!username) { errEl.textContent='아이디를 입력해주세요.'; errEl.style.display='block'; return; }
+  if (username.length < 4) { errEl.textContent='아이디는 4자 이상이어야 합니다.'; errEl.style.display='block'; return; }
+  if (!password || password.length < 6) { errEl.textContent='비밀번호는 6자 이상이어야 합니다.'; errEl.style.display='block'; return; }
+  if (password !== password2) { errEl.textContent='비밀번호가 일치하지 않습니다.'; errEl.style.display='block'; return; }
+  if (!agree) { errEl.textContent='이용약관에 동의해주세요.'; errEl.style.display='block'; return; }
+  btn.textContent='가입 중...'; btn.disabled=true;
+  try {
+    const res = await fetch('/api/auth/register', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ username, nickname: nickname||username, password, phone })
+    });
+    const data = await res.json();
+    if (!data.success) { errEl.textContent = data.error||'가입 실패'; errEl.style.display='block'; return; }
+    okEl.textContent = '🎉 가입 완료! 관리자 승인 후 이용 가능합니다.'; okEl.style.display='block';
+    setTimeout(()=>{ closeModal('register'); switchModal('register','login'); }, 2000);
+    document.getElementById('reg-username').value='';
+    document.getElementById('reg-nickname').value='';
+    document.getElementById('reg-password').value='';
+    document.getElementById('reg-password2').value='';
+    document.getElementById('reg-phone').value='';
+    document.getElementById('reg-agree').checked=false;
+  } catch(e) {
+    errEl.textContent='서버 연결 오류가 발생했습니다.'; errEl.style.display='block';
+  } finally {
+    btn.textContent='가입하기'; btn.disabled=false;
+  }
+}
+
+// ══ 로그아웃 ══
+function doLogout() {
+  clearSession();
+  closeModal('mypage');
+  renderHeader();
+  showToast('로그아웃 되었습니다.');
+}
+
+// ══ 마이페이지 ══
+function openMypage() {
+  if (!_session) { openModal('login'); return; }
+  document.getElementById('my-nickname').textContent = _session.nickname || _session.username;
+  document.getElementById('my-username').textContent = '@' + _session.username;
+  document.getElementById('my-balance').textContent = Number(_session.balance||0).toLocaleString() + ' 원';
+  const statusMap = { active:'<span style="background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.25);color:#4ade80;padding:4px 12px;border-radius:4px;font-size:0.75rem;font-weight:600;">✅ 정상 이용 중</span>',
+    pending:'<span style="background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.25);color:#fbbf24;padding:4px 12px;border-radius:4px;font-size:0.75rem;font-weight:600;">⏳ 승인 대기 중</span>',
+    suspended:'<span style="background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.25);color:#f87171;padding:4px 12px;border-radius:4px;font-size:0.75rem;font-weight:600;">🚫 이용 정지</span>' };
+  document.getElementById('my-status-wrap').innerHTML = statusMap[_session.status] || '';
+  openModal('mypage');
+}
+
+// Enter 키 로그인
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    if (document.getElementById('modal-login').classList.contains('active')) doLogin();
+    if (document.getElementById('modal-register').classList.contains('active')) doRegister();
+  }
+});
+
+function showToast(msg) {
+  let t = document.getElementById('site-toast');
+  if (!t) { t = document.createElement('div'); t.id='site-toast';
+    t.style.cssText='position:fixed;bottom:24px;right:24px;background:linear-gradient(135deg,#1a1500,#2a2000);border:1px solid var(--gold);color:var(--gold);padding:12px 20px;border-radius:8px;font-size:0.82rem;z-index:9999;display:none;box-shadow:0 4px 20px rgba(200,168,75,0.3);';
+    document.body.appendChild(t); }
+  t.textContent = msg; t.style.display='block';
+  clearTimeout(t._timer); t._timer = setTimeout(()=>{ t.style.display='none'; }, 3000);
+}
+
+// 헤더 초기 렌더
+document.addEventListener('DOMContentLoaded', renderHeader);
+
 function openModal(t){document.getElementById('modal-'+t).classList.add('active');document.body.style.overflow='hidden';}
 function closeModal(t){if(t){document.getElementById('modal-'+t).classList.remove('active');}else{document.querySelectorAll('.modal-overlay').forEach(m=>m.classList.remove('active'));}document.body.style.overflow='';}
 function switchModal(a,b){closeModal(a);setTimeout(()=>openModal(b),150);}
