@@ -1719,7 +1719,7 @@ document.querySelectorAll('.nav-link').forEach(el=>{
 // ── Admin 연동: 게임카드 & 공지 실시간 반영 ────────────────────────
 (function(){
   function makeCard(g) {
-    return '<div class="live-card" onclick="openModal(\'register\')">'
+    return '<div class="live-card" onclick="openModal(&apos;register&apos;)">'
       + '<div class="shine"></div>'
       + '<div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>'
       + '<div class="live-thumb"><img src="'+g.img+'" alt="'+g.label+'" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;">'
