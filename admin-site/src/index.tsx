@@ -146,16 +146,18 @@ app.get('/api/users', async (c) => {
 
 app.post('/api/users', async (c) => {
   const body = await c.req.json()
-  const { username, email, phone='', status='pending', balance=0 } = body
-  if (!username||!email) return err('username, email 필수')
+  const { username, nickname='', password='', phone='', exchange_password='', status='pending', balance=0 } = body
+  if (!username) return err('아이디는 필수입니다')
   if (useDB(c)) {
     try {
-      const r = await c.env!.DB!.prepare('INSERT INTO users (username,email,phone,status,balance) VALUES (?,?,?,?,?)').bind(username,email,phone,status,balance).run()
+      const r = await c.env!.DB!.prepare(
+        'INSERT INTO users (username,nickname,password,phone,exchange_password,status,balance) VALUES (?,?,?,?,?,?,?)'
+      ).bind(username,nickname,password,phone,exchange_password,status,balance).run()
       return c.json(ok({ id: r.meta.last_row_id }))
     } catch(e:any){ return c.json({ success:false, error:e.message },500) }
   }
-  if (memUsers.find(u=>u.username===username)) return err('이미 존재하는 아이디')
-  const user = { id:nextUserId++, username, email, phone, status, balance, created_at: new Date().toISOString().slice(0,19).replace('T',' ') }
+  if (memUsers.find((u:any)=>u.username===username)) return err('이미 존재하는 아이디')
+  const user = { id:nextUserId++, username, nickname, password, phone, exchange_password, status, balance, created_at: new Date().toISOString().slice(0,19).replace('T',' ') }
   memUsers.push(user)
   return c.json(ok(user))
 })
@@ -639,11 +641,16 @@ input[type=text].inline,input[type=number].inline,select.inline{width:auto}
     <div class="modal-body">
       <div class="form-row-2">
         <div class="form-row"><label class="form-label">아이디 *</label><input type="text" id="nu-username" placeholder="아이디"></div>
-        <div class="form-row"><label class="form-label">이메일 *</label><input type="email" id="nu-email" placeholder="email@example.com"></div>
+        <div class="form-row"><label class="form-label">닉네임 *</label><input type="text" id="nu-nickname" placeholder="닉네임"></div>
       </div>
       <div class="form-row-2">
-        <div class="form-row"><label class="form-label">연락처</label><input type="text" id="nu-phone" placeholder="010-0000-0000"></div>
-        <div class="form-row"><label class="form-label">초기 잔액</label><input type="number" id="nu-balance" placeholder="0" value="0"></div>
+        <div class="form-row"><label class="form-label">비밀번호 *</label><input type="password" id="nu-password" placeholder="비밀번호"></div>
+        <div class="form-row"><label class="form-label">비밀번호 확인 *</label><input type="password" id="nu-password2" placeholder="비밀번호 재입력"></div>
+      </div>
+      <div class="form-row"><label class="form-label">연락처</label><input type="text" id="nu-phone" placeholder="010-0000-0000"></div>
+      <div class="form-row-2">
+        <div class="form-row"><label class="form-label">환전 비밀번호 *</label><input type="password" id="nu-expass" placeholder="환전 비밀번호"></div>
+        <div class="form-row"><label class="form-label">환전 비밀번호 확인 *</label><input type="password" id="nu-expass2" placeholder="환전 비밀번호 재입력"></div>
       </div>
       <div class="form-row"><label class="form-label">상태</label>
         <select id="nu-status"><option value="pending">대기</option><option value="active">활성</option><option value="suspended">정지</option></select>
@@ -913,12 +920,30 @@ function renderUsers() {
 }
 
 async function addUser() {
-  const body = { username:$('nu-username').value.trim(), email:$('nu-email').value.trim(), phone:$('nu-phone').value.trim(), status:$('nu-status').value, balance:parseInt($('nu-balance').value)||0 }
-  if (!body.username||!body.email){ toast('아이디와 이메일은 필수입니다', true); return }
+  const username  = $('nu-username').value.trim()
+  const nickname  = $('nu-nickname').value.trim()
+  const password  = $('nu-password').value
+  const password2 = $('nu-password2').value
+  const phone     = $('nu-phone').value.trim()
+  const expass    = $('nu-expass').value
+  const expass2   = $('nu-expass2').value
+  const status    = $('nu-status').value
+  if (!username)           { toast('아이디를 입력해주세요', true); return }
+  if (!nickname)           { toast('닉네임을 입력해주세요', true); return }
+  if (!password)           { toast('비밀번호를 입력해주세요', true); return }
+  if (password !== password2) { toast('비밀번호가 일치하지 않습니다', true); return }
+  if (!expass)             { toast('환전 비밀번호를 입력해주세요', true); return }
+  if (expass !== expass2)  { toast('환전 비밀번호가 일치하지 않습니다', true); return }
+  const body = { username, nickname, password, phone, exchange_password: expass, status, balance: 0 }
   const r = await fetch(API+'/api/users',{method:'POST',headers:{...authH(),'Content-Type':'application/json'},body:JSON.stringify(body)})
   const d = await r.json()
-  if (d.success){ closeModal('m-add-user'); toast('회원이 추가되었습니다'); loadUsers() }
-  else toast(d.error||'추가 실패', true)
+  if (d.success){
+    closeModal('m-add-user')
+    // 입력 초기화
+    ;['nu-username','nu-nickname','nu-password','nu-password2','nu-phone','nu-expass','nu-expass2'].forEach(id=>$(''+id).value='')
+    toast('회원이 추가되었습니다')
+    loadUsers()
+  } else toast(d.error||'추가 실패', true)
 }
 
 async function toggleUserStatus(id, cur) {
