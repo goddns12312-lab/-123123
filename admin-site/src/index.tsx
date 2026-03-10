@@ -5,7 +5,16 @@ import { cors } from 'hono/cors'
 type Bindings = { DB?: D1Database; KV?: KVNamespace; ADMIN_USER?: string; ADMIN_PASS?: string }
 const app = new Hono<{ Bindings: Bindings }>()
 
-app.use('/api/*', cors())
+// CORS: user-site(3000)와 admin-site(3001) 모두 허용
+app.use('/api/*', cors({
+  origin: ['http://localhost:3000', 'http://localhost:3001',
+           'http://127.0.0.1:3000', 'http://127.0.0.1:3001',
+           /\.sandbox\.gensparksite\.com$/, /\.sandbox\.novita\.ai$/,
+           /\.pages\.dev$/],
+  allowMethods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  allowHeaders: ['Content-Type','Authorization'],
+  credentials: true,
+}))
 app.use('/static/*', serveStatic({ root: './public' }))
 
 /* ═══════════════════════════════════════════════

@@ -1,7 +1,13 @@
 import { Hono } from 'hono'
 import { serveStatic } from 'hono/cloudflare-workers'
 
-const app = new Hono()
+// ── Admin API URL 설정 ──────────────────────────────────────────
+// 로컬 sandbox 환경: admin-site가 포트 3001에서 실행
+// 실제 배포 시: ADMIN_API_URL 환경변수로 admin-site URL 지정
+const ADMIN_API_URL = 'http://localhost:3001'
+
+type Bindings = { ADMIN_API_URL?: string }
+const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('/static/*', serveStatic({ root: './' }))
 
@@ -11,6 +17,31 @@ app.get('/promotions', (c) => c.html(promotionsPage()))
 
 app.get('/api/winners', (c) => c.json({ winners: recentWinners }))
 app.get('/api/deposits', (c) => c.json({ deposits: recentDeposits }))
+
+// ── Admin 데이터 프록시 엔드포인트 (CORS 우회용) ───────────────────
+// user-site 프론트엔드 → /api/admin/* → admin-site API 전달
+app.get('/api/admin/games', async (c) => {
+  try {
+    const adminUrl = c.env?.ADMIN_API_URL ?? ADMIN_API_URL
+    const res = await fetch(`${adminUrl}/api/games`)
+    const data = await res.json() as any
+    return c.json(data)
+  } catch {
+    // admin-site 미연결 시 기본값 반환
+    return c.json({ success: true, data: { live: defaultLiveGames, slot: defaultSlotGames } })
+  }
+})
+
+app.get('/api/admin/notices', async (c) => {
+  try {
+    const adminUrl = c.env?.ADMIN_API_URL ?? ADMIN_API_URL
+    const res = await fetch(`${adminUrl}/api/notices`)
+    const data = await res.json() as any
+    return c.json(data)
+  } catch {
+    return c.json({ success: true, data: defaultNotices })
+  }
+})
 
 const recentWinners = [
   { user: 'kim***', game: '바카라', amount: '370,000', time: '02:13' },
@@ -28,23 +59,46 @@ const recentDeposits = [
   { user: 'lim***', amount: '220,000', time: '02:06' },
 ]
 
-const liveGames = [
-  { label: '에볼루션', logo: 'EVOLUTION', color: '#b8860b', players: 1284, img: '/static/card_03.jpg' },
-  { label: '프라그마틱', logo: 'PRAGMATIC', color: '#8b6914', players: 983, img: '/static/card_07.jpg' },
-  { label: '아시아게이밍', logo: 'AG', color: '#9a7520', players: 756, img: '/static/card_11.jpg' },
-  { label: '마이크로게이밍', logo: 'MG', color: '#7a6010', players: 432, img: '/static/card_05.jpg' },
-  { label: '드림게임즈', logo: 'DG', color: '#b07820', players: 892, img: '/static/card_09.jpg' },
-  { label: 'WM카지노', logo: 'WM', color: '#c8920a', players: 445, img: '/static/card_01.jpg' },
+// ── 기본 게임 데이터 (admin-site 미연결 시 fallback) ───────────────
+const defaultLiveGames = [
+  { id:'live1',  label:'에볼루션',     img:'/static/card_03.jpg', section:'live1' },
+  { id:'live2',  label:'프라그마틱',   img:'/static/card_07.jpg', section:'live1' },
+  { id:'live3',  label:'아시아게이밍', img:'/static/card_11.jpg', section:'live1' },
+  { id:'live4',  label:'마이크로게이밍',img:'/static/card_05.jpg',section:'live1' },
+  { id:'live5',  label:'드림게임즈',   img:'/static/card_09.jpg', section:'live1' },
+  { id:'live6',  label:'WM카지노',     img:'/static/card_01.jpg', section:'live1' },
+  { id:'live7',  label:'넷엔트',       img:'/static/card_06.jpg', section:'live2' },
+  { id:'live8',  label:'도윈카지노',   img:'/static/card_12.jpg', section:'live2' },
+  { id:'live9',  label:'위닝',         img:'/static/card_04.jpg', section:'live2' },
+  { id:'live10', label:'에즈기',       img:'/static/card_10.jpg', section:'live2' },
+  { id:'live11', label:'N8 카지노',    img:'/static/card_02.jpg', section:'live2' },
+  { id:'live12', label:'게임즈카지노', img:'/static/card_08.jpg', section:'live2' },
+]
+const defaultSlotGames = [
+  { id:'slot1',  label:'프라그마틱',   img:'/static/card_05.jpg' },
+  { id:'slot2',  label:'넷엔트',       img:'/static/card_11.jpg' },
+  { id:'slot3',  label:'노리밋시티',   img:'/static/card_03.jpg' },
+  { id:'slot4',  label:'핵소우',       img:'/static/card_09.jpg' },
+  { id:'slot5',  label:'플레이엔고',   img:'/static/card_01.jpg' },
+  { id:'slot6',  label:'릴렉스게이밍', img:'/static/card_07.jpg' },
+  { id:'slot7',  label:'부운고',       img:'/static/card_02.jpg' },
+  { id:'slot8',  label:'CQ9',          img:'/static/card_08.jpg' },
+  { id:'slot9',  label:'스카이윈드',   img:'/static/card_04.jpg' },
+  { id:'slot10', label:'이보플레이',   img:'/static/card_10.jpg' },
+  { id:'slot11', label:'드래군소프트', img:'/static/card_06.jpg' },
+  { id:'slot12', label:'게임아트',     img:'/static/card_12.jpg' },
+]
+const defaultNotices = [
+  { id:1, title:'벳머니 해킹 안전 확인 안내',    type:'notice', is_active:true },
+  { id:2, title:'카카오 채널 이용방법 안내',      type:'notice', is_active:true },
+  { id:3, title:'파트너 도메인 안내',             type:'notice', is_active:true },
+  { id:4, title:'배팅 배당률 산정 기준',          type:'notice', is_active:true },
+  { id:5, title:'출금 운영 시간 안내',            type:'notice', is_active:true },
 ]
 
-const liveGames2: {label:string,logo:string,color:string,players:number,img:string}[] = [
-  { label: '넷엔트', logo: 'NetEnt', color: '#8b6914', players: 543, img: '/static/card_06.jpg' },
-  { label: '도윈카지노', logo: 'DOWIN', color: '#9a7520', players: 334, img: '/static/card_12.jpg' },
-  { label: '위닝', logo: 'WINN', color: '#b8860b', players: 789, img: '/static/card_04.jpg' },
-  { label: '에즈기', logo: 'EZUGI', color: '#7a6010', players: 621, img: '/static/card_10.jpg' },
-  { label: 'N8 카지노', logo: 'N8', color: '#c8920a', players: 267, img: '/static/card_02.jpg' },
-  { label: '게임즈카지노', logo: 'GAMES', color: '#b07820', players: 198, img: '/static/card_08.jpg' },
-]
+// 하위 호환용 alias (기존 렌더 함수에서 사용)
+const liveGames  = defaultLiveGames.filter(g => g.section === 'live1')
+const liveGames2 = defaultLiveGames.filter(g => g.section === 'live2')
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
@@ -1152,14 +1206,14 @@ function mainPage() {
     </div>
 
     <!-- Row 1 -->
-    <div class="live-grid">
-      ${liveGames.map((g,i) => `
+    <div class="live-grid" id="live-grid-row1">
+      ${liveGames.map((g) => `
       <div class="live-card" onclick="openModal('register')">
         <div class="shine"></div>
         <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
         <div class="live-thumb">
           <img src="${g.img}" alt="${g.label}" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;">
-          ${g.img ? `<div class="card-label-overlay"><span class="card-label-text">${g.label}</span></div>` : ''}
+          <div class="card-label-overlay"><span class="card-label-text">${g.label}</span></div>
         </div>
         <div class="live-footer">
           <span class="live-name">${g.label}</span>
@@ -1169,14 +1223,14 @@ function mainPage() {
     </div>
 
     <!-- Row 2 -->
-    <div class="live-grid" style="margin-top:10px;">
-      ${liveGames2.map((g,i) => `
+    <div class="live-grid" id="live-grid-row2" style="margin-top:10px;">
+      ${liveGames2.map((g) => `
       <div class="live-card" onclick="openModal('register')">
         <div class="shine"></div>
         <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
         <div class="live-thumb">
           <img src="${g.img}" alt="${g.label}" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;">
-          ${g.img ? `<div class="card-label-overlay"><span class="card-label-text">${g.label}</span></div>` : ''}
+          <div class="card-label-overlay"><span class="card-label-text">${g.label}</span></div>
         </div>
         <div class="live-footer">
           <span class="live-name">${g.label}</span>
@@ -1201,83 +1255,25 @@ function mainPage() {
     </div>
 
     <!-- Row 1 -->
-    <div class="live-grid">
+    <div class="live-grid" id="slot-grid-row1">
+      ${defaultSlotGames.slice(0,6).map(g => `
       <div class="live-card" onclick="openModal('register')">
         <div class="shine"></div>
         <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_05.jpg" alt="프라그마틱" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">프라그마틱</span></div></div>
-        <div class="live-footer"><span class="live-name">프라그마틱</span></div>
-      </div>
-      <div class="live-card" onclick="openModal('register')">
-        <div class="shine"></div>
-        <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_11.jpg" alt="넷엔트" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">넷엔트</span></div></div>
-        <div class="live-footer"><span class="live-name">넷엔트</span></div>
-      </div>
-      <div class="live-card" onclick="openModal('register')">
-        <div class="shine"></div>
-        <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_03.jpg" alt="노리밋시티" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">노리밋시티</span></div></div>
-        <div class="live-footer"><span class="live-name">노리밋시티</span></div>
-      </div>
-      <div class="live-card" onclick="openModal('register')">
-        <div class="shine"></div>
-        <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_09.jpg" alt="핵소우" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">핵소우</span></div></div>
-        <div class="live-footer"><span class="live-name">핵소우</span></div>
-      </div>
-      <div class="live-card" onclick="openModal('register')">
-        <div class="shine"></div>
-        <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_01.jpg" alt="플레이엔고" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">플레이엔고</span></div></div>
-        <div class="live-footer"><span class="live-name">플레이엔고</span></div>
-      </div>
-      <div class="live-card" onclick="openModal('register')">
-        <div class="shine"></div>
-        <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_07.jpg" alt="릴렉스게이밍" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">릴렉스게이밍</span></div></div>
-        <div class="live-footer"><span class="live-name">릴렉스게이밍</span></div>
-      </div>
+        <div class="live-thumb"><img src="${g.img}" alt="${g.label}" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">${g.label}</span></div></div>
+        <div class="live-footer"><span class="live-name">${g.label}</span></div>
+      </div>`).join('')}
     </div>
 
     <!-- Row 2 -->
-    <div class="live-grid" style="margin-top:10px;">
+    <div class="live-grid" id="slot-grid-row2" style="margin-top:10px;">
+      ${defaultSlotGames.slice(6,12).map(g => `
       <div class="live-card" onclick="openModal('register')">
         <div class="shine"></div>
         <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_02.jpg" alt="부운고" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">부운고</span></div></div>
-        <div class="live-footer"><span class="live-name">부운고</span></div>
-      </div>
-      <div class="live-card" onclick="openModal('register')">
-        <div class="shine"></div>
-        <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_08.jpg" alt="CQ9" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">CQ9</span></div></div>
-        <div class="live-footer"><span class="live-name">CQ9</span></div>
-      </div>
-      <div class="live-card" onclick="openModal('register')">
-        <div class="shine"></div>
-        <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_04.jpg" alt="스카이윈드" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">스카이윈드</span></div></div>
-        <div class="live-footer"><span class="live-name">스카이윈드</span></div>
-      </div>
-      <div class="live-card" onclick="openModal('register')">
-        <div class="shine"></div>
-        <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_10.jpg" alt="이보플레이" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">이보플레이</span></div></div>
-        <div class="live-footer"><span class="live-name">이보플레이</span></div>
-      </div>
-      <div class="live-card" onclick="openModal('register')">
-        <div class="shine"></div>
-        <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_06.jpg" alt="드래군소프트" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">드래군소프트</span></div></div>
-        <div class="live-footer"><span class="live-name">드래군소프트</span></div>
-      </div>
-      <div class="live-card" onclick="openModal('register')">
-        <div class="shine"></div>
-        <div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>
-        <div class="live-thumb"><img src="/static/card_12.jpg" alt="게임아트" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">게임아트</span></div></div>
-        <div class="live-footer"><span class="live-name">게임아트</span></div>
-      </div>
+        <div class="live-thumb"><img src="${g.img}" alt="${g.label}" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;"><div class="card-label-overlay"><span class="card-label-text">${g.label}</span></div></div>
+        <div class="live-footer"><span class="live-name">${g.label}</span></div>
+      </div>`).join('')}
     </div>
 
   </div>
@@ -1334,11 +1330,11 @@ function mainPage() {
             <span class="notice-ring-icon">📋</span>
             <span style="font-size:0.7rem;color:var(--gold-dim);font-weight:700;letter-spacing:0.05em;">NOTICE</span>
           </div>
-          <div class="notice-list">
-            ${['벳머니 해킹 안전 확인 안내','카카오 채널 이용방법 안내','파트너 도메인 안내','배팅 배당률 산정 기준','출금 운영 시간 안내'].map(t => `
+          <div class="notice-list" id="notice-list">
+            ${defaultNotices.map(t => `
             <div class="notice-item">
               <div class="n-dot"></div>
-              <div class="n-text">${t}</div>
+              <div class="n-text">${t.title}</div>
             </div>`).join('')}
             <div style="text-align:center;margin-top:4px;">
               <div class="notice-more">+</div>
@@ -1718,6 +1714,51 @@ document.querySelectorAll('.nav-link').forEach(el=>{
     }
     lastY = y;
   }, {passive:true});
+})();
+
+// ── Admin 연동: 게임카드 & 공지 실시간 반영 ────────────────────────
+(function(){
+  function makeCard(g) {
+    return '<div class="live-card" onclick="openModal(\'register\')">'
+      + '<div class="shine"></div>'
+      + '<div class="enter-overlay"><span class="enter-label"><i class="fas fa-play"></i>게임입장</span></div>'
+      + '<div class="live-thumb"><img src="'+g.img+'" alt="'+g.label+'" style="width:100%;height:100%;object-fit:cover;display:block;background:#0a0800;">'
+      + '<div class="card-label-overlay"><span class="card-label-text">'+g.label+'</span></div></div>'
+      + '<div class="live-footer"><span class="live-name">'+g.label+'</span></div>'
+      + '</div>';
+  }
+
+  // 게임 데이터 fetch 및 반영
+  fetch('/api/admin/games')
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(!res.success || !res.data) return;
+      var live = res.data.live || [];
+      var slot = res.data.slot || [];
+      var row1 = document.getElementById('live-grid-row1');
+      var row2 = document.getElementById('live-grid-row2');
+      var srow1 = document.getElementById('slot-grid-row1');
+      var srow2 = document.getElementById('slot-grid-row2');
+      if(row1) row1.innerHTML = live.filter(function(g){ return g.section==='live1'; }).map(makeCard).join('');
+      if(row2) row2.innerHTML = live.filter(function(g){ return g.section==='live2'; }).map(makeCard).join('');
+      if(srow1) srow1.innerHTML = slot.slice(0,6).map(makeCard).join('');
+      if(srow2) srow2.innerHTML = slot.slice(6,12).map(makeCard).join('');
+    })
+    .catch(function(){});  // admin 미연결 시 기본값 유지
+
+  // 공지 데이터 fetch 및 반영
+  fetch('/api/admin/notices')
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(!res.success || !res.data) return;
+      var notices = res.data.filter(function(n){ return n.is_active; }).slice(0,5);
+      var list = document.getElementById('notice-list');
+      if(!list || !notices.length) return;
+      list.innerHTML = notices.map(function(n){
+        return '<div class="notice-item"><div class="n-dot"></div><div class="n-text">'+n.title+'</div></div>';
+      }).join('') + '<div style="text-align:center;margin-top:4px;"><div class="notice-more">+</div></div>';
+    })
+    .catch(function(){});  // admin 미연결 시 기본값 유지
 })();
 </script>
 </body>

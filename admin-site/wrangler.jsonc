@@ -12,7 +12,7 @@
     {
       "binding": "DB",
       "database_name": "casino-production",
-      "database_id": "REPLACE_WITH_YOUR_DATABASE_ID"
+      "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
 
